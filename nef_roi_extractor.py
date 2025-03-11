@@ -63,6 +63,9 @@ class ROIManager:
         self.polygon_selector = None
         self.current_roi = []
         self.current_label = ""
+        self.current_vertices = []
+        self.current_temp_poly = None
+        self.text_box = None
         self.drawing_active = False
         
         # Load existing ROIs if provided
@@ -123,33 +126,64 @@ class ROIManager:
         if not self.drawing_active:
             return
         
-        # Ask for label
-        self.current_label = input("Enter a label for this ROI: ")
-        
         # Convert vertices to a list of [x,y] coordinates
         vertices_list = [(x, y) for x, y in zip(vertices[0], vertices[1])]
+        
+        # Save current vertices for later use
+        self.current_vertices = vertices_list
+        
+        # Important: Release mouse grab by disabling the polygon selector first
+        self.polygon_selector.set_active(False)
+        
+        # Create a dialog for label input using matplotlib's built-in dialog
+        from matplotlib.widgets import TextBox
+        
+        # Create a simple text input dialog
+        ax_textbox = plt.axes([0.3, 0.8, 0.4, 0.05])
+        self.text_box = TextBox(ax_textbox, 'ROI Label: ', initial='')
+        self.text_box.on_submit(self.finish_roi_creation)
+        
+        # Show temporary polygon as visual indicator
+        temp_poly = Polygon(vertices_list, fill=True, alpha=0.2, color='g')
+        self.ax.add_patch(temp_poly)
+        self.current_temp_poly = temp_poly
+        
+        plt.draw()
+        
+    def finish_roi_creation(self, label):
+        """Finish the ROI creation process with the provided label."""
+        self.current_label = label
+        
+        # Remove temporary polygon if it exists
+        if hasattr(self, 'current_temp_poly'):
+            self.current_temp_poly.remove()
+            delattr(self, 'current_temp_poly')
         
         # Create a new ROI
         roi = {
             "label": self.current_label,
-            "polygon": vertices_list
+            "polygon": self.current_vertices
         }
         
         # Add to the list of ROIs
         self.rois.append(roi)
         
         # Draw the polygon permanently on the plot
-        poly = Polygon(vertices_list, fill=True, alpha=0.3, color='r')
+        poly = Polygon(self.current_vertices, fill=True, alpha=0.3, color='r')
         self.ax.add_patch(poly)
         
         # Add label text
-        centroid = np.mean(vertices_list, axis=0)
+        centroid = np.mean(self.current_vertices, axis=0)
         self.ax.text(centroid[0], centroid[1], self.current_label, 
                     color='white', fontsize=10, ha='center', va='center')
         
+        # Remove the textbox from the plot
+        if hasattr(self, 'text_box') and self.text_box is not None:
+            self.text_box.ax.remove()
+            self.text_box = None
+        
         # Reset drawing state
         self.drawing_active = False
-        self.polygon_selector.set_active(False)
         self.btn_new_roi.label.set_text("New ROI")
         plt.draw()
     
@@ -168,49 +202,150 @@ class ROIManager:
     def save_rois_dialog(self, event):
         """Save ROIs to a JSON file."""
         if not self.rois:
-            print("No ROIs to save.")
+            # Create a text display instead of print
+            plt.figtext(0.5, 0.9, "No ROIs to save.", ha="center", color="red")
+            plt.draw()
             return
         
-        filename = input("Enter filename to save ROIs (default: rois.json): ") or "rois.json"
-        self.save_rois(filename)
+        # Make sure polygon selector is inactive
+        if self.polygon_selector.active:
+            self.polygon_selector.set_active(False)
+        
+        # Create a file input dialog
+        from matplotlib.widgets import TextBox
+        
+        # Remove existing text if any
+        for txt in self.fig.texts:
+            txt.remove()
+        
+        # Remove any existing auxiliary axes (like previous textboxes)
+        for ax in self.fig.axes[:]:
+            if ax != self.ax:
+                ax.remove()
+            
+        plt.figtext(0.5, 0.9, "Enter filename to save ROIs:", ha="center")
+        ax_textbox = plt.axes([0.3, 0.85, 0.4, 0.05])
+        self.text_box = TextBox(ax_textbox, 'Filename: ', initial='rois.json')
+        self.text_box.on_submit(self.save_rois)
+        plt.draw()
     
     def save_rois(self, filename: str):
         """Save ROIs to a JSON file."""
+        # Remove the input box
+        for ax in self.fig.axes:
+            if ax != self.ax:
+                ax.remove()
+                
+        # Remove existing text
+        for txt in self.fig.texts:
+            txt.remove()
+        
         data = {
             "file_name": self.file_name,
             "rois": self.rois
         }
         
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            # Show success message
+            plt.figtext(0.5, 0.9, f"ROIs saved to {filename}", ha="center", color="green")
+        except Exception as e:
+            # Show error message
+            plt.figtext(0.5, 0.9, f"Error saving ROIs: {str(e)}", ha="center", color="red")
         
-        print(f"ROIs saved to {filename}")
+        plt.draw()
     
     def load_rois(self, filename: str):
         """Load ROIs from a JSON file."""
+        # This method is primarily called from the command line, but we'll 
+        # provide visual feedback if the display is already setup
+        
         try:
             with open(filename, 'r') as f:
                 data = json.load(f)
             
             # Check if the JSON is for the same file
             if data.get("file_name") != self.file_name:
-                print(f"Warning: Loading ROIs from a different file: {data.get('file_name')}")
+                warning_msg = f"Warning: Loading ROIs from a different file: {data.get('file_name')}"
+                print(warning_msg)  # For command line feedback
+                
+                # If display is setup, show warning in GUI
+                if hasattr(self, 'fig') and self.fig is not None:
+                    plt.figtext(0.5, 0.95, warning_msg, ha="center", color="orange")
             
             self.rois = data.get("rois", [])
-            print(f"Loaded {len(self.rois)} ROIs from {filename}")
+            success_msg = f"Loaded {len(self.rois)} ROIs from {filename}"
+            print(success_msg)  # For command line feedback
+            
+            # If display is setup, show success in GUI
+            if hasattr(self, 'fig') and self.fig is not None:
+                plt.figtext(0.5, 0.9, success_msg, ha="center", color="green")
+                plt.draw()
+                
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error loading ROIs: {e}")
+            error_msg = f"Error loading ROIs: {e}"
+            print(error_msg)  # For command line feedback
+            
+            # If display is setup, show error in GUI
+            if hasattr(self, 'fig') and self.fig is not None:
+                plt.figtext(0.5, 0.9, error_msg, ha="center", color="red")
+                plt.draw()
     
     def process_rois(self, event):
         """Process all ROIs and export data to CSV."""
         if not self.rois:
-            print("No ROIs to process.")
+            # Create a text display instead of print
+            plt.figtext(0.5, 0.9, "No ROIs to process.", ha="center", color="red")
+            plt.draw()
             return
         
-        filename = input("Enter CSV filename (default: pixel_data.csv): ") or "pixel_data.csv"
+        # Make sure polygon selector is inactive
+        if self.polygon_selector.active:
+            self.polygon_selector.set_active(False)
+        
+        # Create a file input dialog
+        from matplotlib.widgets import TextBox
+        
+        # Remove existing text if any
+        for txt in self.fig.texts:
+            txt.remove()
+            
+        # Remove any existing auxiliary axes (like previous textboxes)
+        for ax in self.fig.axes[:]:
+            if ax != self.ax:
+                ax.remove()
+            
+        plt.figtext(0.5, 0.9, "Enter filename to save CSV data:", ha="center")
+        ax_textbox = plt.axes([0.3, 0.85, 0.4, 0.05])
+        self.text_box = TextBox(ax_textbox, 'Filename: ', initial='pixel_data.csv')
+        self.text_box.on_submit(self.export_data)
+        plt.draw()
+    
+    def export_data(self, filename):
+        """Process and export data based on the provided filename."""
+        # Remove the textbox from the plot
+        if hasattr(self, 'text_box') and self.text_box is not None:
+            self.text_box.ax.remove()
+            self.text_box = None
+        
+        # Remove any other auxiliary axes
+        for ax in self.fig.axes[:]:
+            if ax != self.ax:
+                ax.remove()
+                
+        # Remove any existing text
+        for txt in self.fig.texts:
+            txt.remove()
+                
+        # Show processing message
+        plt.figtext(0.5, 0.9, "Processing ROIs...", ha="center")
+        plt.draw()
         
         # Process each ROI and collect data
         all_data = []
+        status_messages = []
         
         height, width, channels = self.rgb.shape
         for roi in self.rois:
@@ -242,13 +377,27 @@ class ROIManager:
                         "y": int(y),
                         "pixel_value": int(pixel_value)
                     })
-                    
-            print(f"Processed ROI: {label} with {len(points_inside)} pixels")
+            
+            status_message = f"Processed ROI: {label} with {len(points_inside)} pixels"
+            status_messages.append(status_message)
         
         # Create and save DataFrame
         df = pd.DataFrame(all_data)
         df.to_csv(filename, index=False)
-        print(f"Data saved to {filename}")
+        
+        # Update status message
+        for txt in self.fig.texts:
+            txt.remove()
+            
+        plt.figtext(0.5, 0.9, f"Data saved to {filename}", ha="center", color="green")
+        
+        # Display processing results
+        y_pos = 0.85
+        for message in status_messages:
+            plt.figtext(0.5, y_pos, message, ha="center", fontsize=9)
+            y_pos -= 0.03
+            
+        plt.draw()
     
     def quit_app(self, event):
         """Exit the application."""
