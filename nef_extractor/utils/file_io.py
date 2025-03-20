@@ -4,10 +4,15 @@ File input/output utilities.
 
 import json
 import pandas as pd
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 
 
-def save_rois_to_json(filename: str, file_name: str, rois: List[Dict[str, Any]]) -> bool:
+def save_rois_to_json(
+    filename: str, 
+    file_name: str, 
+    rois: List[Dict[str, Any]], 
+    white_balance: Optional[Tuple[float, float, float]] = None
+) -> bool:
     """
     Save ROIs to a JSON file.
     
@@ -15,6 +20,7 @@ def save_rois_to_json(filename: str, file_name: str, rois: List[Dict[str, Any]])
         filename: Path to save the JSON file
         file_name: Original image filename
         rois: List of ROI dictionaries
+        white_balance: Optional white balance multipliers
         
     Returns:
         bool: True if successful, False otherwise
@@ -23,6 +29,14 @@ def save_rois_to_json(filename: str, file_name: str, rois: List[Dict[str, Any]])
         "file_name": file_name,
         "rois": rois
     }
+    
+    # Add white balance if provided
+    if white_balance:
+        data["white_balance"] = {
+            "red": white_balance[0],
+            "green": white_balance[1],
+            "blue": white_balance[2]
+        }
     
     try:
         with open(filename, 'w') as f:
