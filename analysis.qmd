@@ -29,7 +29,7 @@ roi_labels <- c(
     "12100" = "PLA Tough White",
     "12300" = "PLA Tough Orange",
     "11101" = "PLA Matte Black",
-    "11100" = "PLA Matte Whtie",
+    "11100" = "PLA Matte White",
     "11300" = "PLA Matte Orange",
     "40101" = "ABS Black",
     "40100" = "ABS White",
@@ -37,7 +37,7 @@ roi_labels <- c(
     "40402" = "ABS Gold",
     "orange" = "Monarch Orange",
     "white" = "Monarch White",
-    "black" = "Monarch black",
+    "black" = "Monarch Black",
     "gold" = "Monarch Gold"
 )
 ```
@@ -77,5 +77,34 @@ df <- csv_files %>%
     # Convert all column names to lowercase for consistency
     rename_with(tolower) %>%
     # Rename 'roi_label' to 'roi' for brevity
-    rename(roi = roi_label)
+    rename(roi = roi_label) %>%
+    # Extract the last word from the 'roi' column to create the 'color' column
+    mutate(color = word(roi, -1))
+```
+
+## Histograms by color
+
+```{r}
+# Get unique colors
+unique_colors <- unique(df$color)
+
+# Loop through each color and create a plot
+for (col in unique_colors) {
+    # Filter data for the current color
+    color_df <- df %>% filter(color == col)
+
+    # Create the plot
+    p <- ggplot(color_df, aes(x = value)) +
+        geom_histogram(bins = 30) + # Adjust bins as needed
+        facet_grid(channel ~ roi, scales = "free_y") + # Facet by channel (rows) and roi (columns)
+        labs(
+            title = paste("Histogram of Values for", col, "ROIs by Channel"),
+            x = "Value",
+            y = "Frequency"
+        ) +
+        theme_minimal() # Use a minimal theme
+
+    # Print the plot
+    print(p)
+}
 ```
