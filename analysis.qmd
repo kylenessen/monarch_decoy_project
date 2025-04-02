@@ -85,31 +85,31 @@ df <- csv_files %>%
 print(paste("Total rows before subsampling:", nrow(df)))
 ```
 
-## Check Minimum Group Size
+## Check Minimum Group Size (Aggregated Across Channels)
 
-Before subsampling, let's determine the smallest number of observations within any `roi` x `channel` group. This will inform our choice of subsampling size.
+Before subsampling, let's determine the smallest total number of observations for any `roi`, combining all channels. This will inform our choice of subsampling size when treating each ROI as a whole.
 
 ```{r}
 library(dplyr)
 
-# Calculate group sizes
+# Calculate group sizes per ROI (aggregating channels)
 group_sizes <- df %>%
-    group_by(roi, channel) %>%
-    summarise(count = n(), .groups = "drop") # Use summarise with n()
+    group_by(roi) %>%
+    summarise(count = n(), .groups = "drop") # Count total pixels per ROI
 
 # Find the minimum size
 min_size <- min(group_sizes$count)
 
 # Print the minimum size
-print(paste("Minimum sample size across all roi x channel groups:", min_size))
+print(paste("Minimum total sample size across all ROIs (all channels combined):", min_size))
 
 # Optional: Display all group sizes
 # print(group_sizes)
 ```
 
-## Perform Subsampling
+## Perform Subsampling (Aggregated Across Channels)
 
-Based on the minimum group size and the desire for balanced histograms, we will randomly sample a fixed number of observations from each `roi` x `channel` group. Let's choose a sample size (e.g., 1000, or `min_size` if it's smaller and still reasonably large).
+Based on the minimum group size (aggregated across channels) and the desire for balanced histograms, we will randomly sample a fixed number of observations from each `roi`. This sample will include pixels from any channel belonging to that ROI.
 
 ```{r}
 # Define the target sample size per group
@@ -127,23 +127,23 @@ print(paste("Using target sample size:", target_sample_size))
 # Set seed for reproducibility
 set.seed(123)
 
-# Perform subsampling
+# Perform subsampling per ROI
 df_subsampled <- df %>%
-    group_by(roi, channel) %>%
-    slice_sample(n = target_sample_size, replace = FALSE) %>% # Sample without replacement
+    group_by(roi) %>% # Group only by ROI
+    slice_sample(n = target_sample_size, replace = FALSE) %>% # Sample N pixels from each ROI, regardless of channel
     ungroup() # Ungroup for subsequent operations
 
 # Check total rows after subsampling
 print(paste("Total rows after subsampling:", nrow(df_subsampled)))
 
-# Verify counts per group in the subsampled data
-# subsampled_counts <- df_subsampled %>% count(roi, channel)
+# Verify counts per ROI in the subsampled data
+# subsampled_counts <- df_subsampled %>% count(roi)
 # print(subsampled_counts)
 
 ```
 
 
-## Histograms by color (Using Subsampled Data)
+## Histograms by color (Using Subsampled Data, Channels Combined)
 
 ```{r}
 # Get unique colors from the subsampled data
@@ -154,13 +154,14 @@ for (col in unique_colors_subsampled) {
     # Filter subsampled data for the current color
     color_df_subsampled <- df_subsampled %>% filter(color == col)
 
-    # Create the plot using the subsampled data
+    # Create the plot using the subsampled data, channels combined
     p <- ggplot(color_df_subsampled, aes(x = value)) +
         geom_histogram(bins = 30) + # Adjust bins as needed
-        facet_grid(channel ~ roi, scales = "free_y") + # Facet by channel (rows) and roi (columns)
+        # facet_grid(channel ~ roi, scales = "free_y") + # Old: Facet by channel and roi
+        facet_wrap(~roi, scales = "free_y") + # New: Facet only by roi
         labs(
-            title = paste("Histogram of Values for", col, "ROIs by Channel"),
-            x = "Value",
+            title = paste("Histogram of Values for", col, "ROIs (Channels Combined)"),
+            x = "Value (All Channels)",
             y = "Frequency"
         ) +
         theme_minimal() # Use a minimal theme
@@ -170,21 +171,22 @@ for (col in unique_colors_subsampled) {
 }
 ```
 
-## Statistical Comparison (Kolmogorov-Smirnov Test)
+## Statistical Comparison (Kolmogorov-Smirnov Test, Channels Combined)
 
-Now that we have subsampled data, we can perform statistical tests to compare the distribution of pixel values for each filament ROI against the corresponding Monarch ROI within each channel and color group. The Kolmogorov-Smirnov (K-S) test is suitable for comparing two empirical distributions.
+Now that we have subsampled data aggregated by ROI (channels combined), we can perform statistical tests to compare the overall distribution of pixel values for each filament ROI against the corresponding Monarch ROI within each color group.
 
 A small p-value suggests the distributions are significantly different. The D statistic measures the maximum distance between the cumulative distribution functions; smaller D indicates more similarity.
 
 ```{r}
-# Function to perform and format K-S test
-run_ks_test <- function(monarch_data, filament_data, roi_filament, current_channel, current_color) {
+# Function to perform and format K-S test (channels combined)
+run_ks_test_combined <- function(monarch_data, filament_data, roi_filament, current_color) {
     # Ensure there's data for both monarch and filament for this specific comparison
     if (nrow(monarch_data) > 0 && nrow(filament_data) > 0) {
+        # Compare the 'value' column directly, as channels are already combined in the subsample
         ks_result <- ks.test(monarch_data$value, filament_data$value)
         return(tibble(
             color = current_color,
-            channel = current_channel,
+            # channel = current_channel, # Removed channel
             filament_roi = roi_filament,
             ks_statistic_D = ks_result$statistic,
             p_value = ks_result$p.value
@@ -193,7 +195,7 @@ run_ks_test <- function(monarch_data, filament_data, roi_filament, current_chann
         # Return NA or an empty tibble if data is missing for the pair
         return(tibble(
             color = current_color,
-            channel = current_channel,
+            # channel = current_channel, # Removed channel
             filament_roi = roi_filament,
             ks_statistic_D = NA,
             p_value = NA
@@ -205,20 +207,19 @@ run_ks_test <- function(monarch_data, filament_data, roi_filament, current_chann
 monarch_subsampled <- df_subsampled %>% filter(category == "Monarch")
 filament_subsampled <- df_subsampled %>% filter(category == "Filament")
 
-# Get unique combinations of color and channel present in Monarch data
-monarch_groups <- monarch_subsampled %>% distinct(color, channel)
+# Get unique colors present in Monarch data
+monarch_colors <- monarch_subsampled %>%
+    distinct(color) %>%
+    pull(color)
 
 # Initialize an empty list to store results
 ks_results_list <- list()
 
-# Loop through each Monarch color/channel group
-for (i in 1:nrow(monarch_groups)) {
-    current_color <- monarch_groups$color[i]
-    current_channel <- monarch_groups$channel[i]
-
-    # Get the Monarch data for this group
+# Loop through each Monarch color group
+for (current_color in monarch_colors) {
+    # Get the Monarch data for this color (all channels combined)
     monarch_group_data <- monarch_subsampled %>%
-        filter(color == current_color, channel == current_channel)
+        filter(color == current_color)
 
     # Get all filament ROIs matching this color
     filament_rois_for_color <- filament_subsampled %>%
@@ -228,32 +229,32 @@ for (i in 1:nrow(monarch_groups)) {
 
     # Loop through each matching filament ROI
     for (roi_filament in filament_rois_for_color) {
-        # Get the filament data for this specific ROI and channel
+        # Get the filament data for this specific ROI (all channels combined)
         filament_group_data <- filament_subsampled %>%
-            filter(roi == roi_filament, channel == current_channel)
+            filter(roi == roi_filament) # Filter only by ROI, as channels are combined
 
-        # Run the K-S test and store the result
-        test_result <- run_ks_test(monarch_group_data, filament_group_data, roi_filament, current_channel, current_color)
+        # Run the K-S test (combined version) and store the result
+        test_result <- run_ks_test_combined(monarch_group_data, filament_group_data, roi_filament, current_color)
         ks_results_list[[length(ks_results_list) + 1]] <- test_result
     }
 }
 
 # Combine results into a single dataframe
 ks_results_df <- bind_rows(ks_results_list) %>%
-    arrange(color, channel, ks_statistic_D) # Sort by similarity (smaller D is better)
+    arrange(color, ks_statistic_D) # Sort by similarity (smaller D is better) within each color
 
 # Print the results table
 print(ks_results_df)
 
 # You can further analyze ks_results_df, e.g., find the filament_roi with the smallest D statistic
 # for each color/channel combination to identify the 'best' match based on this test.
-# Example: Find best match for each group
-# best_matches <- ks_results_df %>%
-#   group_by(color, channel) %>%
-#   filter(!is.na(ks_statistic_D)) %>% # Ensure D is not NA
-#   slice_min(order_by = ks_statistic_D, n = 1) %>%
-#   ungroup()
-# print("Best matches based on minimum K-S statistic (D):")
-# print(best_matches)
+# Example: Find best match for each color group
+best_matches <- ks_results_df %>%
+   group_by(color) %>% # Group only by color
+   filter(!is.na(ks_statistic_D)) %>% # Ensure D is not NA
+   slice_min(order_by = ks_statistic_D, n = 1) %>%
+   ungroup()
+print("Best matches (channels combined) based on minimum K-S statistic (D):")
+print(best_matches)
 
 ```
