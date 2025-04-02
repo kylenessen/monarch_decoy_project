@@ -13,24 +13,7 @@ execute:
     message: false
 date: last-modified
 ---
-
-## Load data
-
-```{r}
-library(tidyverse)
-library(here)
-
-# List all CSV files in the data directory
-csv_files <- list.files(path = here("data"), pattern = "*.csv", full.names = TRUE)
-
-# Read and combine all CSV files
-df <- csv_files %>%
-    map_df(~ read_csv(., col_types = cols(.default = "c"))) %>%
-    type.convert(as.is = TRUE)
-```
-
-
-## Specify ROI Labels 
+## Establish ROI Labels
 
 ```{r}
 roi_labels <- c(
@@ -59,52 +42,40 @@ roi_labels <- c(
 )
 ```
 
-## Clean up mislabels
-```{r}
-# Show unique ROI values in df not present in roi_labels
-setdiff(unique(df$ROI_Label), names(roi_labels))
-```
+## Load data
 
 ```{r}
-# convert "\\gold" and "\\white" to "gold" and "white"
-df <- df %>%
+library(tidyverse)
+library(here)
+
+# List all CSV files in the data directory
+csv_files <- list.files(path = here("data"), pattern = "*.csv", full.names = TRUE)
+
+# Read and combine all CSV files, then clean and transform
+df <- csv_files %>%
+    # Read each CSV file and combine into one dataframe
+    map_df(~ read_csv(., col_types = cols(.default = "c"))) %>%
+    # Attempt to convert columns to appropriate types (e.g., numeric, factor)
+    type.convert(as.is = TRUE) %>%
+    # Correct specific ROI label misentries
     mutate(ROI_Label = str_replace_all(ROI_Label, "\\\\gold", "gold")) %>%
-    mutate(ROI_Label = str_replace_all(ROI_Label, "\\\\white", "white"))
-```
-
-```{r}
-# Show unique ROI values in df not present in roi_labels
-setdiff(unique(df$ROI_Label), names(roi_labels))
-```
-
-## Map labels
-
-```{r}
-df <- df %>%
-    mutate(ROI_Label = recode(ROI_Label, !!!roi_labels))
-```
-
-## Clean up
-
-### Correct channel label for UV
-```{r}
-df <- df %>%
-    mutate(Channel = if_else(Image_Source == "UV", "UV", Channel))
-```
-
-### Set dataset category
-
-```{r}
-df <- df %>%
-    mutate(category = if_else(str_detect(ROI_Label, "Monarch"), "Monarch", "Filament"))
-```
-
-### drop Image Source column and rename columns
-
-```{r}
-df <- df %>%
+    mutate(ROI_Label = str_replace_all(ROI_Label, "\\\\white", "white")) %>%
+    # Apply the defined ROI labels using the roi_labels named vector
+    mutate(ROI_Label = recode(ROI_Label, !!!roi_labels)) %>%
+    # Ensure the 'Channel' column is correctly set to "UV" for UV images
+    mutate(Channel = if_else(Image_Source == "UV", "UV", Channel)) %>%
+    # Rename specific channel values for clarity
+    mutate(Channel = recode(Channel,
+        "B" = "Blue",
+        "G" = "Green",
+        "UV" = "Ultraviolet"
+    )) %>%
+    # Create a 'category' column distinguishing "Monarch" from "Filament" based on ROI label
+    mutate(category = if_else(str_detect(ROI_Label, "Monarch"), "Monarch", "Filament")) %>%
+    # Remove the original 'Image_Source' column as it's no longer needed
     select(-Image_Source) %>%
+    # Convert all column names to lowercase for consistency
     rename_with(tolower) %>%
+    # Rename 'roi_label' to 'roi' for brevity
     rename(roi = roi_label)
 ```
-
