@@ -1,0 +1,110 @@
+---
+title: "Monarch Decoy Analysis"
+author: "Kyle Nessen"
+format:
+    html:
+        code-fold: true
+        toc: true
+        toc-depth: 3
+        theme: cosmo
+execute:
+    echo: true
+    warning: false
+    message: false
+date: last-modified
+---
+
+## Load data
+
+```{r}
+library(tidyverse)
+library(here)
+
+# List all CSV files in the data directory
+csv_files <- list.files(path = here("data"), pattern = "*.csv", full.names = TRUE)
+
+# Read and combine all CSV files
+df <- csv_files %>%
+    map_df(~ read_csv(., col_types = cols(.default = "c"))) %>%
+    type.convert(as.is = TRUE)
+```
+
+
+## Specify ROI Labels 
+
+```{r}
+roi_labels <- c(
+    "30101" = "PETG Basic Black",
+    "30100" = "PETG Basic White",
+    "30300" = "PETG Basic Orange",
+    "30401" = "PETG Basic Gold",
+    "10101" = "PLA Basic Black",
+    "10100" = "PLA Basic White",
+    "10300" = "PLA Basic Orange",
+    "10401" = "PLA Basic Gold",
+    "12101" = "PLA Tough Black",
+    "12100" = "PLA Tough White",
+    "12300" = "PLA Tough Orange",
+    "11101" = "PLA Matte Black",
+    "11100" = "PLA Matte Whtie",
+    "11300" = "PLA Matte Orange",
+    "40101" = "ABS Black",
+    "40100" = "ABS White",
+    "40300" = "ABS Orange",
+    "40402" = "ABS Gold",
+    "orange" = "Monarch Orange",
+    "white" = "Monarch White",
+    "black" = "Monarch black",
+    "gold" = "Monarch Gold"
+)
+```
+
+## Clean up mislabels
+```{r}
+# Show unique ROI values in df not present in roi_labels
+setdiff(unique(df$ROI_Label), names(roi_labels))
+```
+
+```{r}
+# convert "\\gold" and "\\white" to "gold" and "white"
+df <- df %>%
+    mutate(ROI_Label = str_replace_all(ROI_Label, "\\\\gold", "gold")) %>%
+    mutate(ROI_Label = str_replace_all(ROI_Label, "\\\\white", "white"))
+```
+
+```{r}
+# Show unique ROI values in df not present in roi_labels
+setdiff(unique(df$ROI_Label), names(roi_labels))
+```
+
+## Map labels
+
+```{r}
+df <- df %>%
+    mutate(ROI_Label = recode(ROI_Label, !!!roi_labels))
+```
+
+## Clean up
+
+### Correct channel label for UV
+```{r}
+df <- df %>%
+    mutate(Channel = if_else(Image_Source == "UV", "UV", Channel))
+```
+
+### Set dataset category
+
+```{r}
+df <- df %>%
+    mutate(category = if_else(str_detect(ROI_Label, "Monarch"), "Monarch", "Filament"))
+```
+
+### drop Image Source column and rename columns
+
+```{r}
+df <- df %>%
+    select(-Image_Source) %>%
+    rename_with(tolower) %>%
+    rename(roi = roi_label)
+```
+
