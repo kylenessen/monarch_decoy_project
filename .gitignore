@@ -24,9 +24,6 @@ var/
 venv/
 ENV/
 
-# Project specific
-*.csv
-*.json
 
 # Jupyter Notebooks
 .ipynb_checkpoints

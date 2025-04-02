@@ -14,10 +14,10 @@ import time  # For pausing after plot display
 # from skimage import draw # Example if needed
 
 # --- Configuration ---
-INPUT_DIR = Path("images")
+# INPUT_DIR = Path("images") # Input path now comes from command line
 OUTPUT_DIR = Path(".")  # Save CSVs in the current directory
 # IMAGE_SUFFIX = ".NEF" # Changed to specific JPEGs
-TARGET_IMAGES = ["VIS.jpg", "UV.jpg"]  # Process only these images
+# TARGET_IMAGES = ["VIS.jpg", "UV.jpg"] # Process only one image specified by arg
 
 # --- Helper Functions ---
 # White balance functions (select_rectangle, calculate_wb_multipliers) removed
@@ -172,9 +172,19 @@ def process_image(image_path, output_dir):
         ax_roi.set_title(
             f"Define ROIs - {image_source} (Press 'n' for next, 'q' to finish)")
         roi_selector = ROISelector(ax_roi, image_array.shape)
-        # Keep plot open until 'q' is pressed in ROISelector
-        plt.show(block=True)  # Block execution until ROI selection is finished
 
+        # Display the plot but manage the event loop manually
+        plt.show(block=False)
+
+        # Keep the script running and processing GUI events until 'q' is pressed
+        # The roi_selector.drawing flag is set to False in the on_key('q') method
+        print("Waiting for ROI selection ('n'/'q' keys in plot window)...")
+        while roi_selector.drawing:
+            # Pause allows the GUI to remain responsive and process events
+            plt.pause(0.1)
+        print("ROI selection finished.")  # Add confirmation
+
+        # Now that the loop is finished (because 'q' was pressed), get the ROIs
         rois = roi_selector.get_rois()
         if not rois:
             print("No ROIs defined. Skipping data extraction for this image.")
@@ -213,29 +223,30 @@ def process_image(image_path, output_dir):
 
 
 if __name__ == "__main__":
-    # Find target JPEG files in the input directory
-    image_files_to_process = []
-    for img_name in TARGET_IMAGES:
-        path = INPUT_DIR / img_name
-        if path.is_file():
-            image_files_to_process.append(path)
-        else:
-            print(
-                f"Warning: Target image '{img_name}' not found in '{INPUT_DIR}'. Skipping.")
-
-    if not image_files_to_process:
-        print(
-            f"Error: No target images ({', '.join(TARGET_IMAGES)}) found in directory '{INPUT_DIR}'.")
+    if len(sys.argv) != 2:
+        print("Usage: python process_image.py <path_to_image.jpg>")
+        print("Example: python process_image.py images/VIS.jpg")
         sys.exit(1)
 
-    print(
-        f"Found images to process: {[f.name for f in image_files_to_process]}")
+    image_path_arg = sys.argv[1]
+    image_file = Path(image_path_arg)
+
+    if not image_file.is_file():
+        print(f"Error: Image file not found at '{image_path_arg}'")
+        sys.exit(1)
+
+    # Validate supported image types if needed (e.g., check suffix)
+    if image_file.suffix.lower() not in ['.jpg', '.jpeg']:
+        print(
+            f"Error: Only JPEG files (.jpg, .jpeg) are supported. Found: {image_file.suffix}")
+        sys.exit(1)
+
+    print(f"Processing image: {image_file.name}")
 
     # Create output directory if it doesn't exist
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Process each image
-    for image_file in image_files_to_process:
-        process_image(image_file, OUTPUT_DIR)
+    # Process the single specified image
+    process_image(image_file, OUTPUT_DIR)
 
-    print("\n--- Processing Complete ---")
+    print(f"\n--- Processing Complete for {image_file.name} ---")
